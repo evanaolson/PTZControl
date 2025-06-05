@@ -7,6 +7,7 @@
 #include "PTZControl.h"
 #include "PTZControlDlg.h"
 #include "SettingsDlg.h"
+#include "HttpServer.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -236,6 +237,7 @@ CPTZControlDlg::CPTZControlDlg(CWnd* pParent /*=nullptr*/)
 	, m_iNumWebCams(0)
 	, m_evTerminating(FALSE,TRUE)
 	, m_pGuardThread(nullptr)
+	, m_pHttpServer(nullptr)
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 	m_hAccel = ::LoadAccelerators(AfxFindResourceHandle(IDR_ACCELERATOR, RT_ACCELERATOR), MAKEINTRESOURCE(IDR_ACCELERATOR));
@@ -250,6 +252,14 @@ CPTZControlDlg::~CPTZControlDlg()
 void CPTZControlDlg::PostNcDestroy()
 {
 	__super::PostNcDestroy();
+
+	// Cleanup the HTTP server
+	if (m_pHttpServer)
+	{
+		m_pHttpServer->Stop();
+		delete m_pHttpServer;
+		m_pHttpServer = nullptr;
+	}
 
 	// Cleanup the guard thread.
 	m_evTerminating.SetEvent();
@@ -674,7 +684,24 @@ BOOL CPTZControlDlg::OnInitDialog()
 		}
 	}
 
-	return FALSE;  
+	//---------------------------------------------------------------------
+	// INIT HTTP SERVER
+	
+	// Initialize and start the HTTP server for remote control
+	m_pHttpServer = new CHttpServer(this);
+	if (m_pHttpServer && m_pHttpServer->Start(5000))
+	{
+		// HTTP server started successfully on port 5000
+		// This allows remote control via web dashboard
+	}
+	else
+	{
+		// Failed to start HTTP server - continue without network functionality
+		delete m_pHttpServer;
+		m_pHttpServer = nullptr;
+	}
+
+	return FALSE;
 }
 
 // If you add a minimize button to your dialog, you will need the code below
@@ -945,4 +972,3 @@ void CPTZControlDlg::OnBtSettings()
 	// Set tooltips again
 	SetActiveCam(m_iCurrentWebCam);
 }
-

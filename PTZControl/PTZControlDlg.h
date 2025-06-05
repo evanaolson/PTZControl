@@ -1,10 +1,12 @@
-
 // PTZControlDlg.h : header file
 //
 
 #pragma once
 #include "resource.h"
 #include "ExtensionUnit.h"
+
+// Forward declaration to avoid circular dependency
+class CHttpServer;
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // CPTZButton
@@ -71,6 +73,10 @@ class CPTZControlDlg : public CDialogEx
 public:
 	CPTZControlDlg(CWnd* pParent = nullptr);	// standard constructor
 	~CPTZControlDlg();
+
+	// Friend declaration to allow CHttpServer access to protected members
+	friend class CHttpServer;
+
 // Dialog Data
 	enum { IDD = IDD_PTZCONTROL_DIALOG };
 	static const int NUM_MAX_WEBCAMS = 3;
@@ -112,6 +118,9 @@ protected:
 	CEvent	m_evTerminating;
 	CWinThread* m_pGuardThread;
 	static UINT AFX_CDECL GuardThread(LPVOID hWnd); // AFX_THREADPROC
+
+	// HTTP Server
+	CHttpServer* m_pHttpServer;
 
 // Implementation
 protected:

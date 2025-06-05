@@ -117,4 +117,3 @@ enum
 // 	RESET_PAN = 1,
 // 	RESET_TILT = 2,
 // };
-
