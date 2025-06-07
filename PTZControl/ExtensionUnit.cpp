@@ -89,6 +89,7 @@ void CWebcamController::CloseDevice()
 {
 	m_spKsControl = nullptr;
 	m_spAMCameraControl = nullptr;
+	m_spVideoProcAmp = nullptr;
 	m_spsPropertySet = nullptr;
 	m_spCameraControl = nullptr;
 
@@ -288,8 +289,12 @@ HRESULT CWebcamController::OpenDevice(CComPtr<IMoniker> pMoniker)
 		m_spKsControl = pKsControl;
 
 		m_spAMCameraControl = pKsControl;
+		m_spVideoProcAmp = pKsControl;
 		m_spsPropertySet =  pKsControl;
 		m_spCameraControl = pKsControl;		// not supported
+
+		// Initialize camera settings cache
+		RefreshCameraSettings();
 	}
 
 	if (m_spAMCameraControl!=nullptr)
@@ -662,4 +667,356 @@ void CWebcamController::ListDevices(CStringArray &aDevices)
 			}
 		}
 	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Camera Settings Implementation
+
+HRESULT CWebcamController::GetVideoProcAmpProperty(long property, long* value, long* flags)
+{
+	if (!m_spVideoProcAmp || !value || !flags)
+		return E_INVALIDARG;
+		
+	return m_spVideoProcAmp->Get(property, value, flags);
+}
+
+HRESULT CWebcamController::SetVideoProcAmpProperty(long property, long value, long flags)
+{
+	if (!m_spVideoProcAmp)
+		return E_INVALIDARG;
+		
+	return m_spVideoProcAmp->Set(property, value, flags);
+}
+
+HRESULT CWebcamController::GetVideoProcAmpRange(long property, long* min, long* max, long* step, long* default_val, long* flags)
+{
+	if (!m_spVideoProcAmp || !min || !max || !step || !default_val || !flags)
+		return E_INVALIDARG;
+		
+	return m_spVideoProcAmp->GetRange(property, min, max, step, default_val, flags);
+}
+
+HRESULT CWebcamController::GetBrightness(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_Brightness, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.brightness = *value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetBrightness(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_Brightness, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.brightness = value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetContrast(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_Contrast, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.contrast = *value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetContrast(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_Contrast, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.contrast = value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetHue(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_Hue, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.hue = *value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetHue(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_Hue, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.hue = value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetSaturation(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_Saturation, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.saturation = *value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetSaturation(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_Saturation, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.saturation = value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetSharpness(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_Sharpness, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.sharpness = *value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetSharpness(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_Sharpness, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.sharpness = value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetGamma(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_Gamma, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.gamma = *value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetGamma(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_Gamma, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.gamma = value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetWhiteBalance(long* value, bool* isAuto)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_WhiteBalance, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.whiteBalance = *value;
+		m_cameraSettings.autoWhiteBalance = (flags & VideoProcAmp_Flags_Auto) != 0;
+		if (isAuto) *isAuto = m_cameraSettings.autoWhiteBalance;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetWhiteBalance(long value, bool isAuto)
+{
+	long flags = isAuto ? VideoProcAmp_Flags_Auto : VideoProcAmp_Flags_Manual;
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_WhiteBalance, value, flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.whiteBalance = value;
+		m_cameraSettings.autoWhiteBalance = isAuto;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetBacklightCompensation(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_BacklightCompensation, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.backlightCompensation = *value;
+		m_cameraSettings.rightLight = (*value > 0);
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetBacklightCompensation(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_BacklightCompensation, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.backlightCompensation = value;
+		m_cameraSettings.rightLight = (value > 0);
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetGain(long* value)
+{
+	long flags;
+	HRESULT hr = GetVideoProcAmpProperty(VideoProcAmp_Gain, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.gain = *value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetGain(long value)
+{
+	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_Gain, value, VideoProcAmp_Flags_Manual);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.gain = value;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetPowerlineFrequency(long* value)
+{
+	// PowerlineFrequency might not be available in all DirectShow versions
+	// Use a fallback approach or skip if not supported
+	*value = m_cameraSettings.powerlineFrequency;
+	return S_OK;
+}
+
+HRESULT CWebcamController::SetPowerlineFrequency(long value)
+{
+	// PowerlineFrequency might not be available in all DirectShow versions
+	// Store the value locally for now
+	m_cameraSettings.powerlineFrequency = value;
+	return S_OK;
+}
+
+HRESULT CWebcamController::GetExposure(long* value, bool* isAuto)
+{
+	if (!m_spAMCameraControl || !value)
+		return E_INVALIDARG;
+		
+	long flags;
+	HRESULT hr = m_spAMCameraControl->Get(CameraControl_Exposure, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.exposure = *value;
+		m_cameraSettings.autoExposure = (flags & CameraControl_Flags_Auto) != 0;
+		if (isAuto) *isAuto = m_cameraSettings.autoExposure;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetExposure(long value, bool isAuto)
+{
+	if (!m_spAMCameraControl)
+		return E_INVALIDARG;
+		
+	long flags = isAuto ? CameraControl_Flags_Auto : CameraControl_Flags_Manual;
+	HRESULT hr = m_spAMCameraControl->Set(CameraControl_Exposure, value, flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.exposure = value;
+		m_cameraSettings.autoExposure = isAuto;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::GetFocus(long* value, bool* isAuto)
+{
+	if (!m_spAMCameraControl || !value)
+		return E_INVALIDARG;
+		
+	long flags;
+	HRESULT hr = m_spAMCameraControl->Get(CameraControl_Focus, value, &flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.focus = *value;
+		m_cameraSettings.autoFocus = (flags & CameraControl_Flags_Auto) != 0;
+		if (isAuto) *isAuto = m_cameraSettings.autoFocus;
+	}
+	return hr;
+}
+
+HRESULT CWebcamController::SetFocus(long value, bool isAuto)
+{
+	if (!m_spAMCameraControl)
+		return E_INVALIDARG;
+		
+	long flags = isAuto ? CameraControl_Flags_Auto : CameraControl_Flags_Manual;
+	HRESULT hr = m_spAMCameraControl->Set(CameraControl_Focus, value, flags);
+	if (SUCCEEDED(hr)) {
+		m_cameraSettings.focus = value;
+		m_cameraSettings.autoFocus = isAuto;
+	}
+	return hr;
+}
+
+CWebcamController::CameraSettings CWebcamController::GetAllCameraSettings()
+{
+	RefreshCameraSettings();
+	return m_cameraSettings;
+}
+
+HRESULT CWebcamController::SetCameraSettings(const CameraSettings& settings)
+{
+	HRESULT hr = S_OK;
+	
+	// Set VideoProcAmp properties
+	if (FAILED(SetBrightness(settings.brightness))) hr = E_FAIL;
+	if (FAILED(SetContrast(settings.contrast))) hr = E_FAIL;
+	if (FAILED(SetHue(settings.hue))) hr = E_FAIL;
+	if (FAILED(SetSaturation(settings.saturation))) hr = E_FAIL;
+	if (FAILED(SetSharpness(settings.sharpness))) hr = E_FAIL;
+	if (FAILED(SetGamma(settings.gamma))) hr = E_FAIL;
+	if (FAILED(SetWhiteBalance(settings.whiteBalance, settings.autoWhiteBalance))) hr = E_FAIL;
+	if (FAILED(SetBacklightCompensation(settings.backlightCompensation))) hr = E_FAIL;
+	if (FAILED(SetGain(settings.gain))) hr = E_FAIL;
+	if (FAILED(SetPowerlineFrequency(settings.powerlineFrequency))) hr = E_FAIL;
+	
+	// Set CameraControl properties
+	if (FAILED(SetExposure(settings.exposure, settings.autoExposure))) hr = E_FAIL;
+	if (FAILED(SetFocus(settings.focus, settings.autoFocus))) hr = E_FAIL;
+	
+	return hr;
+}
+
+HRESULT CWebcamController::ResetCameraSettings()
+{
+	// Reset to default values
+	CameraSettings defaults;
+	return SetCameraSettings(defaults);
+}
+
+HRESULT CWebcamController::RefreshCameraSettings()
+{
+	HRESULT hr = S_OK;
+	
+	// Refresh VideoProcAmp properties
+	long value;
+	bool isAuto;
+	
+	if (SUCCEEDED(GetBrightness(&value))) m_cameraSettings.brightness = value;
+	if (SUCCEEDED(GetContrast(&value))) m_cameraSettings.contrast = value;
+	if (SUCCEEDED(GetHue(&value))) m_cameraSettings.hue = value;
+	if (SUCCEEDED(GetSaturation(&value))) m_cameraSettings.saturation = value;
+	if (SUCCEEDED(GetSharpness(&value))) m_cameraSettings.sharpness = value;
+	if (SUCCEEDED(GetGamma(&value))) m_cameraSettings.gamma = value;
+	if (SUCCEEDED(GetWhiteBalance(&value, &isAuto))) {
+		m_cameraSettings.whiteBalance = value;
+		m_cameraSettings.autoWhiteBalance = isAuto;
+	}
+	if (SUCCEEDED(GetBacklightCompensation(&value))) {
+		m_cameraSettings.backlightCompensation = value;
+		m_cameraSettings.rightLight = (value > 0);
+	}
+	if (SUCCEEDED(GetGain(&value))) m_cameraSettings.gain = value;
+	if (SUCCEEDED(GetPowerlineFrequency(&value))) m_cameraSettings.powerlineFrequency = value;
+	
+	// Refresh CameraControl properties
+	if (SUCCEEDED(GetExposure(&value, &isAuto))) {
+		m_cameraSettings.exposure = value;
+		m_cameraSettings.autoExposure = isAuto;
+	}
+	if (SUCCEEDED(GetFocus(&value, &isAuto))) {
+		m_cameraSettings.focus = value;
+		m_cameraSettings.autoFocus = isAuto;
+	}
+	
+	return hr;
 }

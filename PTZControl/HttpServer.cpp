@@ -75,6 +75,10 @@ bool CHttpServer::Start(int port)
     RegisterRoute("POST", "/api/presets/([0-9]+)/recall", [this](const HttpRequest& req) { return HandlePresetRecall(req); });
     RegisterRoute("GET", "/api/settings", [this](const HttpRequest& req) { return HandleCameraSettings(req); });
     RegisterRoute("POST", "/api/settings", [this](const HttpRequest& req) { return HandleCameraSettings(req); });
+    RegisterRoute("GET", "/api/camera/settings/([0-9]+)", [this](const HttpRequest& req) { return HandleGetCameraSettings(req); });
+    RegisterRoute("POST", "/api/camera/settings/([0-9]+)", [this](const HttpRequest& req) { return HandleSetCameraSettings(req); });
+    RegisterRoute("GET", "/api/camera/settings/([0-9]+)/ranges", [this](const HttpRequest& req) { return HandleGetCameraSettingsRanges(req); });
+    RegisterRoute("POST", "/api/camera/settings/([0-9]+)/reset", [this](const HttpRequest& req) { return HandleResetCameraSettings(req); });
     RegisterRoute("POST", "/api/controls/advanced", [this](const HttpRequest& req) { return HandleAdvancedControls(req); });
     RegisterRoute("OPTIONS", ".*", [this](const HttpRequest& req) { return HandleCORS(req); });
 
@@ -715,4 +719,216 @@ std::map<std::string, std::string> CHttpServer::ParseQueryString(const std::stri
     }
     
     return params;
+}
+
+HttpResponse CHttpServer::HandleGetCameraSettings(const HttpRequest& request)
+{
+    HttpResponse response;
+    
+    try {
+        if (m_pDialog) {
+            CWebcamController& cam = m_pDialog->GetCurrentWebCam();
+            CWebcamController::CameraSettings settings = cam.GetAllCameraSettings();
+            
+            std::ostringstream json;
+            json << "{";
+            json << "\"brightness\":" << settings.brightness << ",";
+            json << "\"contrast\":" << settings.contrast << ",";
+            json << "\"hue\":" << settings.hue << ",";
+            json << "\"saturation\":" << settings.saturation << ",";
+            json << "\"sharpness\":" << settings.sharpness << ",";
+            json << "\"gamma\":" << settings.gamma << ",";
+            json << "\"whiteBalance\":" << settings.whiteBalance << ",";
+            json << "\"backlightCompensation\":" << settings.backlightCompensation << ",";
+            json << "\"gain\":" << settings.gain << ",";
+            json << "\"colorEnable\":" << settings.colorEnable << ",";
+            json << "\"powerlineFrequency\":" << settings.powerlineFrequency << ",";
+            json << "\"exposure\":" << settings.exposure << ",";
+            json << "\"focus\":" << settings.focus << ",";
+            json << "\"autoExposure\":" << (settings.autoExposure ? "true" : "false") << ",";
+            json << "\"autoWhiteBalance\":" << (settings.autoWhiteBalance ? "true" : "false") << ",";
+            json << "\"autoFocus\":" << (settings.autoFocus ? "true" : "false") << ",";
+            json << "\"rightLight\":" << (settings.rightLight ? "true" : "false");
+            json << "}";
+            
+            response.body = json.str();
+        } else {
+            response.status_code = 500;
+            response.body = "{\"error\":\"Camera not available\"}";
+        }
+    } catch (...) {
+        response.status_code = 500;
+        response.body = "{\"error\":\"Failed to get camera settings\"}";
+    }
+    
+    return response;
+}
+
+HttpResponse CHttpServer::HandleSetCameraSettings(const HttpRequest& request)
+{
+    HttpResponse response;
+    
+    try {
+        if (m_pDialog) {
+            CWebcamController& cam = m_pDialog->GetCurrentWebCam();
+            std::string body = request.body;
+            
+            // Parse individual settings from JSON body
+            // This is a simple parser - in production you'd want a proper JSON library
+            
+            // Parse brightness
+            size_t pos = body.find("\"brightness\":");
+            if (pos != std::string::npos) {
+                size_t start = pos + 12;
+                size_t end = body.find_first_of(",}", start);
+                if (end != std::string::npos) {
+                    long value = std::stol(body.substr(start, end - start));
+                    cam.SetBrightness(value);
+                }
+            }
+            
+            // Parse contrast
+            pos = body.find("\"contrast\":");
+            if (pos != std::string::npos) {
+                size_t start = pos + 11;
+                size_t end = body.find_first_of(",}", start);
+                if (end != std::string::npos) {
+                    long value = std::stol(body.substr(start, end - start));
+                    cam.SetContrast(value);
+                }
+            }
+            
+            // Parse saturation
+            pos = body.find("\"saturation\":");
+            if (pos != std::string::npos) {
+                size_t start = pos + 13;
+                size_t end = body.find_first_of(",}", start);
+                if (end != std::string::npos) {
+                    long value = std::stol(body.substr(start, end - start));
+                    cam.SetSaturation(value);
+                }
+            }
+            
+            // Parse exposure
+            pos = body.find("\"autoExposure\":");
+            if (pos != std::string::npos) {
+                bool autoExposure = body.find("\"autoExposure\":true", pos) != std::string::npos;
+                long exposureValue = 0;
+                
+                size_t expPos = body.find("\"exposure\":");
+                if (expPos != std::string::npos) {
+                    size_t start = expPos + 11;
+                    size_t end = body.find_first_of(",}", start);
+                    if (end != std::string::npos) {
+                        exposureValue = std::stol(body.substr(start, end - start));
+                    }
+                }
+                
+                cam.SetExposure(exposureValue, autoExposure);
+            }
+            
+            // Parse white balance
+            pos = body.find("\"autoWhiteBalance\":");
+            if (pos != std::string::npos) {
+                bool autoWB = body.find("\"autoWhiteBalance\":true", pos) != std::string::npos;
+                long wbValue = 5200; // Default
+                
+                size_t wbPos = body.find("\"whiteBalance\":");
+                if (wbPos != std::string::npos) {
+                    size_t start = wbPos + 15;
+                    size_t end = body.find_first_of(",}", start);
+                    if (end != std::string::npos) {
+                        wbValue = std::stol(body.substr(start, end - start));
+                    }
+                }
+                
+                cam.SetWhiteBalance(wbValue, autoWB);
+            }
+            
+            response.body = "{\"success\":true}";
+        } else {
+            response.status_code = 500;
+            response.body = "{\"error\":\"Camera not available\"}";
+        }
+    } catch (...) {
+        response.status_code = 500;
+        response.body = "{\"error\":\"Failed to set camera settings\"}";
+    }
+    
+    return response;
+}
+
+HttpResponse CHttpServer::HandleGetCameraSettingsRanges(const HttpRequest& request)
+{
+    HttpResponse response;
+    
+    try {
+        if (m_pDialog) {
+            CWebcamController& cam = m_pDialog->GetCurrentWebCam();
+            
+            std::ostringstream json;
+            json << "{";
+            
+            // Get ranges for various properties
+            long min, max, step, defaultVal, flags;
+            
+            // Brightness range
+            if (SUCCEEDED(cam.GetVideoProcAmpRange(VideoProcAmp_Brightness, &min, &max, &step, &defaultVal, &flags))) {
+                json << "\"brightness\":{\"min\":" << min << ",\"max\":" << max << ",\"step\":" << step << ",\"default\":" << defaultVal << "},";
+            }
+            
+            // Contrast range
+            if (SUCCEEDED(cam.GetVideoProcAmpRange(VideoProcAmp_Contrast, &min, &max, &step, &defaultVal, &flags))) {
+                json << "\"contrast\":{\"min\":" << min << ",\"max\":" << max << ",\"step\":" << step << ",\"default\":" << defaultVal << "},";
+            }
+            
+            // Saturation range
+            if (SUCCEEDED(cam.GetVideoProcAmpRange(VideoProcAmp_Saturation, &min, &max, &step, &defaultVal, &flags))) {
+                json << "\"saturation\":{\"min\":" << min << ",\"max\":" << max << ",\"step\":" << step << ",\"default\":" << defaultVal << "},";
+            }
+            
+            // Remove trailing comma and close
+            std::string jsonStr = json.str();
+            if (jsonStr.back() == ',') {
+                jsonStr.pop_back();
+            }
+            jsonStr += "}";
+            
+            response.body = jsonStr;
+        } else {
+            response.status_code = 500;
+            response.body = "{\"error\":\"Camera not available\"}";
+        }
+    } catch (...) {
+        response.status_code = 500;
+        response.body = "{\"error\":\"Failed to get camera settings ranges\"}";
+    }
+    
+    return response;
+}
+
+HttpResponse CHttpServer::HandleResetCameraSettings(const HttpRequest& request)
+{
+    HttpResponse response;
+    
+    try {
+        if (m_pDialog) {
+            CWebcamController& cam = m_pDialog->GetCurrentWebCam();
+            
+            if (SUCCEEDED(cam.ResetCameraSettings())) {
+                response.body = "{\"success\":true}";
+            } else {
+                response.status_code = 500;
+                response.body = "{\"error\":\"Failed to reset camera settings\"}";
+            }
+        } else {
+            response.status_code = 500;
+            response.body = "{\"error\":\"Camera not available\"}";
+        }
+    } catch (...) {
+        response.status_code = 500;
+        response.body = "{\"error\":\"Failed to reset camera settings\"}";
+    }
+    
+    return response;
 }

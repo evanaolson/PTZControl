@@ -85,6 +85,10 @@ private:
     HttpResponse HandlePresetSave(const HttpRequest& request);
     HttpResponse HandlePresetRecall(const HttpRequest& request);
     HttpResponse HandleCameraSettings(const HttpRequest& request);
+    HttpResponse HandleGetCameraSettings(const HttpRequest& request);
+    HttpResponse HandleSetCameraSettings(const HttpRequest& request);
+    HttpResponse HandleGetCameraSettingsRanges(const HttpRequest& request);
+    HttpResponse HandleResetCameraSettings(const HttpRequest& request);
     HttpResponse HandleAdvancedControls(const HttpRequest& request);
     
     // Helper methods
