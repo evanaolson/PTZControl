@@ -100,6 +100,20 @@ public:
 	HRESULT GetFocus(long* value, bool* isAuto);
 	HRESULT SetFocus(long value, bool isAuto);
 	
+	// Enhanced property testing and capability detection
+	bool SupportsVideoProcAmpProperty(long property);
+	bool SupportsCameraControlProperty(long property);
+	HRESULT TestAndGetVideoProcAmpRange(long property, long* min, long* max, long* step, long* default_val, long* flags);
+	HRESULT TestAndGetCameraControlRange(long property, long* min, long* max, long* step, long* default_val, long* flags);
+
+	// Standard DirectShow interface availability
+	bool HasVideoProcAmpInterface() const { return m_spVideoProcAmp != nullptr; }
+	bool HasCameraControlInterface() const { return m_spAMCameraControl != nullptr; }
+
+	// Hybrid control methods (try extension unit first, fallback to DirectShow)
+	HRESULT SetPropertyHybrid(long property, long value, bool isVideoProcAmp = true);
+	HRESULT GetPropertyHybrid(long property, long* value, bool isVideoProcAmp = true);
+	
 	// Convenience methods
 	CameraSettings GetAllCameraSettings();
 	HRESULT SetCameraSettings(const CameraSettings& settings);

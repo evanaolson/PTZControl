@@ -281,20 +281,70 @@ HRESULT CWebcamController::OpenDevice(CComPtr<IMoniker> pMoniker)
 	if(FAILED(hr))
 		return hr;
 
-	// Find the H.264 XU node
+	// CRITICAL: Initialize DirectShow interfaces properly
+	CComPtr<IBaseFilter> pBaseFilter;
+	hr = pMoniker->BindToObject(NULL, NULL, __uuidof(IBaseFilter), (void **)&pBaseFilter);
+	if (SUCCEEDED(hr)) {
+		// Query standard DirectShow interfaces from base filter
+		pBaseFilter->QueryInterface(__uuidof(IAMCameraControl), (void **)&m_spAMCameraControl);
+		pBaseFilter->QueryInterface(__uuidof(IAMVideoProcAmp), (void **)&m_spVideoProcAmp);
+		pBaseFilter->QueryInterface(__uuidof(IKsPropertySet), (void **)&m_spsPropertySet);
+		
+		TRACE(__FUNCTION__ " DirectShow interfaces initialized: VideoProcAmp=%s, CameraControl=%s\n",
+			m_spVideoProcAmp ? "YES" : "NO",
+			m_spAMCameraControl ? "YES" : "NO");
+	}
+
+	// Find the H.264 XU node (existing functionality)
 	hr = InitializeXUNodesArray(pKsControl);
 	if(SUCCEEDED(hr))
 	{
 		// save the pointer, we succeeded
 		m_spKsControl = pKsControl;
 
-		m_spAMCameraControl = pKsControl;
-		m_spVideoProcAmp = pKsControl;
-		m_spsPropertySet =  pKsControl;
+		// Only set these if we don't already have the interfaces from BaseFilter
+		if (!m_spAMCameraControl) {
+			m_spAMCameraControl = pKsControl;
+		}
+		if (!m_spVideoProcAmp) {
+			m_spVideoProcAmp = pKsControl;
+		}
+		if (!m_spsPropertySet) {
+			m_spsPropertySet = pKsControl;
+		}
 		m_spCameraControl = pKsControl;		// not supported
 
 		// Initialize camera settings cache
 		RefreshCameraSettings();
+	}
+
+	// Test DirectShow interface availability
+	if (m_spVideoProcAmp) {
+		TRACE(__FUNCTION__ " Testing VideoProcAmp properties:\n");
+		long min, max, step, def, flags;
+		
+		// Test common properties
+		if (SUCCEEDED(m_spVideoProcAmp->GetRange(VideoProcAmp_Brightness, &min, &max, &step, &def, &flags))) {
+			TRACE("  Brightness: min=%d, max=%d, step=%d, default=%d\n", min, max, step, def);
+		}
+		if (SUCCEEDED(m_spVideoProcAmp->GetRange(VideoProcAmp_Contrast, &min, &max, &step, &def, &flags))) {
+			TRACE("  Contrast: min=%d, max=%d, step=%d, default=%d\n", min, max, step, def);
+		}
+		if (SUCCEEDED(m_spVideoProcAmp->GetRange(VideoProcAmp_WhiteBalance, &min, &max, &step, &def, &flags))) {
+			TRACE("  WhiteBalance: min=%d, max=%d, step=%d, default=%d\n", min, max, step, def);
+		}
+	}
+
+	if (m_spAMCameraControl) {
+		TRACE(__FUNCTION__ " Testing CameraControl properties:\n");
+		long min, max, step, def, flags;
+		
+		if (SUCCEEDED(m_spAMCameraControl->GetRange(CameraControl_Focus, &min, &max, &step, &def, &flags))) {
+			TRACE("  Focus: min=%d, max=%d, step=%d, default=%d\n", min, max, step, def);
+		}
+		if (SUCCEEDED(m_spAMCameraControl->GetRange(CameraControl_Exposure, &min, &max, &step, &def, &flags))) {
+			TRACE("  Exposure: min=%d, max=%d, step=%d, default=%d\n", min, max, step, def);
+		}
 	}
 
 	if (m_spAMCameraControl!=nullptr)
@@ -667,6 +717,155 @@ void CWebcamController::ListDevices(CStringArray &aDevices)
 			}
 		}
 	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Enhanced DirectShow Interface Support
+
+bool CWebcamController::SupportsVideoProcAmpProperty(long property)
+{
+	if (!m_spVideoProcAmp)
+		return false;
+
+	long min, max, step, def, flags;
+	HRESULT hr = m_spVideoProcAmp->GetRange(property, &min, &max, &step, &def, &flags);
+	return SUCCEEDED(hr);
+}
+
+bool CWebcamController::SupportsCameraControlProperty(long property)
+{
+	if (!m_spAMCameraControl)
+		return false;
+
+	long min, max, step, def, flags;
+	HRESULT hr = m_spAMCameraControl->GetRange(property, &min, &max, &step, &def, &flags);
+	return SUCCEEDED(hr);
+}
+
+HRESULT CWebcamController::TestAndGetVideoProcAmpRange(long property, long* min, long* max, long* step, long* default_val, long* flags)
+{
+	if (!m_spVideoProcAmp || !min || !max || !step || !default_val || !flags)
+		return E_INVALIDARG;
+
+	return m_spVideoProcAmp->GetRange(property, min, max, step, default_val, flags);
+}
+
+HRESULT CWebcamController::TestAndGetCameraControlRange(long property, long* min, long* max, long* step, long* default_val, long* flags)
+{
+	if (!m_spAMCameraControl || !min || !max || !step || !default_val || !flags)
+		return E_INVALIDARG;
+
+	return m_spAMCameraControl->GetRange(property, min, max, step, default_val, flags);
+}
+
+HRESULT CWebcamController::SetPropertyHybrid(long property, long value, bool isVideoProcAmp)
+{
+	HRESULT hr = E_FAIL;
+
+	// First try Logitech Extension Unit (existing functionality)
+	if (isVideoProcAmp) {
+		// Try setting via extension unit first for Logitech cameras
+		if (m_dwXUVideoPipeControlNodeId != NONODE) {
+			// Map DirectShow property to extension unit property
+			ULONG xuProperty = 0;
+			bool hasXUMapping = false;
+
+			switch (property) {
+				case VideoProcAmp_BacklightCompensation:
+					// Map to RightLight mode control
+					xuProperty = XU_VIDEO_RIGHTLIGHT_MODE_CONTROL;
+					hasXUMapping = true;
+					break;
+				case VideoProcAmp_ColorEnable:
+					// Map to color boost control
+					xuProperty = XU_VIDEO_COLOR_BOOST_CONTROL;
+					hasXUMapping = true;
+					break;
+				// Note: Other properties like brightness, contrast, etc. don't have direct XU mappings
+				// They will fall through to DirectShow interface
+			}
+
+			if (hasXUMapping) {
+				DWORD dwValue = static_cast<DWORD>(value);
+				hr = SetProperty(XU_VIDEOPIPE_CONTROL, xuProperty, sizeof(DWORD), &dwValue);
+				if (SUCCEEDED(hr)) {
+					return hr;
+				}
+			}
+		}
+
+		// Fallback to standard DirectShow VideoProcAmp
+		if (m_spVideoProcAmp) {
+			hr = m_spVideoProcAmp->Set(property, value, VideoProcAmp_Flags_Manual);
+			if (SUCCEEDED(hr)) {
+				return hr;
+			}
+		}
+	} else {
+		// Camera Control properties
+		if (m_spAMCameraControl) {
+			hr = m_spAMCameraControl->Set(property, value, CameraControl_Flags_Manual);
+			if (SUCCEEDED(hr)) {
+				return hr;
+			}
+		}
+	}
+
+	return hr;
+}
+
+HRESULT CWebcamController::GetPropertyHybrid(long property, long* value, bool isVideoProcAmp)
+{
+	if (!value)
+		return E_INVALIDARG;
+
+	HRESULT hr = E_FAIL;
+	long flags = 0;
+
+	if (isVideoProcAmp) {
+		// Try extension unit first, then fallback to DirectShow
+		if (m_dwXUVideoPipeControlNodeId != NONODE) {
+			// Try extension unit retrieval
+			DWORD dwValue = 0;
+			ULONG xuProperty = 0;
+			bool hasXUMapping = false;
+
+			switch (property) {
+				case VideoProcAmp_BacklightCompensation:
+					// Map to RightLight mode control
+					xuProperty = XU_VIDEO_RIGHTLIGHT_MODE_CONTROL;
+					hasXUMapping = true;
+					break;
+				case VideoProcAmp_ColorEnable:
+					// Map to color boost control
+					xuProperty = XU_VIDEO_COLOR_BOOST_CONTROL;
+					hasXUMapping = true;
+					break;
+				// Note: Other properties like brightness, contrast, etc. don't have direct XU mappings
+				// They will fall through to DirectShow interface
+			}
+
+			if (hasXUMapping) {
+				hr = GetProperty(XU_VIDEOPIPE_CONTROL, xuProperty, sizeof(DWORD), &dwValue);
+				if (SUCCEEDED(hr)) {
+					*value = static_cast<long>(dwValue);
+					return hr;
+				}
+			}
+		}
+
+		// Fallback to standard DirectShow VideoProcAmp
+		if (m_spVideoProcAmp) {
+			hr = m_spVideoProcAmp->Get(property, value, &flags);
+		}
+	} else {
+		// Camera Control properties
+		if (m_spAMCameraControl) {
+			hr = m_spAMCameraControl->Get(property, value, &flags);
+		}
+	}
+
+	return hr;
 }
 
 //////////////////////////////////////////////////////////////////////////

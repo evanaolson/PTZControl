@@ -92,6 +92,7 @@ private:
     HttpResponse HandleAdvancedControls(const HttpRequest& request);
     
     // Helper methods
+    long ExtractLongValue(const std::string& json, const std::string& key);
     std::string JsonEscape(const std::string& str);
     std::string GetCameraStatusJson();
     std::string GetCameraInfoJson();

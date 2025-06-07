@@ -499,13 +499,6 @@ HttpResponse CHttpServer::HandlePresetRecall(const HttpRequest& request)
     return response;
 }
 
-// Define property IDs for camera settings
-#define XU_VIDEO_EXPOSURE_MODE 0x10
-#define XU_VIDEO_WHITE_BALANCE_MODE 0x11
-#define XU_VIDEO_GAIN 0x12
-#define XU_VIDEO_BACKLIGHT_COMPENSATION 0x13
-#define XU_VIDEO_FOCUS_MODE 0x14
-
 HttpResponse CHttpServer::HandleCameraSettings(const HttpRequest& request)
 {
     HttpResponse response;
@@ -514,87 +507,72 @@ HttpResponse CHttpServer::HandleCameraSettings(const HttpRequest& request)
         response.body = GetCameraSettingsJson();
     } else if (request.method == "POST") {
         try {
-            // Parse the JSON body to get the settings
             std::string body = request.body;
             
             if (m_pDialog) {
                 CWebcamController& cam = m_pDialog->GetCurrentWebCam();
                 
-                // Check for exposure setting
-                if (body.find("\"exposure\"") != std::string::npos) {
-                    std::string exposureMode;
-                    if (body.find("\"exposure\":\"AUTO\"") != std::string::npos) {
-                        exposureMode = "AUTO";
-                    } else if (body.find("\"exposure\":\"MANUAL\"") != std::string::npos) {
-                        exposureMode = "MANUAL";
-                    }
-                    
-                    if (!exposureMode.empty()) {
-                        // Use the extension unit to set exposure mode
-                        DWORD dwValue = exposureMode == "AUTO" ? 1 : 0;
-                        cam.SetProperty(XU_VIDEOPIPE_CONTROL, XU_VIDEO_EXPOSURE_MODE, sizeof(DWORD), &dwValue);
-                    }
+                // Parse and apply DirectShow properties properly using hybrid methods
+                if (body.find("\"brightness\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "brightness");
+                    cam.SetPropertyHybrid(VideoProcAmp_Brightness, value, true);
                 }
                 
-                // Check for white balance setting
+                if (body.find("\"contrast\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "contrast");
+                    cam.SetPropertyHybrid(VideoProcAmp_Contrast, value, true);
+                }
+                
+                if (body.find("\"saturation\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "saturation");
+                    cam.SetPropertyHybrid(VideoProcAmp_Saturation, value, true);
+                }
+                
+                if (body.find("\"hue\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "hue");
+                    cam.SetPropertyHybrid(VideoProcAmp_Hue, value, true);
+                }
+                
+                if (body.find("\"sharpness\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "sharpness");
+                    cam.SetPropertyHybrid(VideoProcAmp_Sharpness, value, true);
+                }
+                
+                if (body.find("\"gamma\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "gamma");
+                    cam.SetPropertyHybrid(VideoProcAmp_Gamma, value, true);
+                }
+                
                 if (body.find("\"whiteBalance\"") != std::string::npos) {
-                    std::string wbMode;
-                    if (body.find("\"whiteBalance\":\"AUTO\"") != std::string::npos) {
-                        wbMode = "AUTO";
-                    } else if (body.find("\"whiteBalance\":\"MANUAL\"") != std::string::npos) {
-                        wbMode = "MANUAL";
-                    } else if (body.find("\"whiteBalance\":\"INDOOR\"") != std::string::npos) {
-                        wbMode = "INDOOR";
-                    } else if (body.find("\"whiteBalance\":\"OUTDOOR\"") != std::string::npos) {
-                        wbMode = "OUTDOOR";
-                    }
-                    
-                    if (!wbMode.empty()) {
-                        // Use the extension unit to set white balance mode
-                        DWORD dwValue = 0; // Default to AUTO
-                        if (wbMode == "MANUAL") dwValue = 1;
-                        else if (wbMode == "INDOOR") dwValue = 2;
-                        else if (wbMode == "OUTDOOR") dwValue = 3;
-                        
-                        cam.SetProperty(XU_VIDEOPIPE_CONTROL, XU_VIDEO_WHITE_BALANCE_MODE, sizeof(DWORD), &dwValue);
-                    }
+                    long value = ExtractLongValue(body, "whiteBalance");
+                    cam.SetPropertyHybrid(VideoProcAmp_WhiteBalance, value, true);
                 }
-
-                // Check for gain setting
+                
+                if (body.find("\"backlightCompensation\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "backlightCompensation");
+                    cam.SetPropertyHybrid(VideoProcAmp_BacklightCompensation, value, true);
+                }
+                
                 if (body.find("\"gain\"") != std::string::npos) {
-                    size_t gainPos = body.find("\"gain\":");
-                    if (gainPos != std::string::npos) {
-                        size_t valueStart = gainPos + 7;
-                        size_t valueEnd = body.find(",", valueStart);
-                        if (valueEnd == std::string::npos) valueEnd = body.find("}", valueStart);
-                        if (valueEnd != std::string::npos) {
-                            std::string gainStr = body.substr(valueStart, valueEnd - valueStart);
-                            int gain = std::stoi(gainStr);
-                            DWORD dwValue = static_cast<DWORD>(gain);
-                            cam.SetProperty(XU_VIDEOPIPE_CONTROL, XU_VIDEO_GAIN, sizeof(DWORD), &dwValue);
-                        }
-                    }
+                    long value = ExtractLongValue(body, "gain");
+                    cam.SetPropertyHybrid(VideoProcAmp_Gain, value, true);
                 }
-
-                // Check for rightLight setting (backlight compensation)
-                if (body.find("\"rightLight\"") != std::string::npos) {
-                    bool rightLight = body.find("\"rightLight\":true") != std::string::npos;
-                    DWORD dwValue = rightLight ? 1 : 0;
-                    cam.SetProperty(XU_VIDEOPIPE_CONTROL, XU_VIDEO_BACKLIGHT_COMPENSATION, sizeof(DWORD), &dwValue);
+                
+                if (body.find("\"exposure\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "exposure");
+                    cam.SetPropertyHybrid(CameraControl_Exposure, value, false);
                 }
-
-                // Check for autoFocus setting
-                if (body.find("\"autoFocus\"") != std::string::npos) {
-                    bool autoFocus = body.find("\"autoFocus\":true") != std::string::npos;
-                    DWORD dwValue = autoFocus ? 1 : 0;
-                    cam.SetProperty(XU_VIDEOPIPE_CONTROL, XU_VIDEO_FOCUS_MODE, sizeof(DWORD), &dwValue);
+                
+                if (body.find("\"focus\"") != std::string::npos) {
+                    long value = ExtractLongValue(body, "focus");
+                    cam.SetPropertyHybrid(CameraControl_Focus, value, false);
                 }
+                
+                // Note: PowerlineFrequency is not a standard DirectShow property
+                // It would need to be handled through extension units if supported
             }
             
             response.body = "{\"success\":true}";
-        } catch (std::exception& e) {
-            response.status_code = 500;
-            response.body = "{\"error\":\"Failed to update camera settings: " + std::string(e.what()) + "\"}";
         } catch (...) {
             response.status_code = 500;
             response.body = "{\"error\":\"Failed to update camera settings\"}";
@@ -609,6 +587,26 @@ HttpResponse CHttpServer::HandleAdvancedControls(const HttpRequest& request)
     HttpResponse response;
     response.body = "{\"success\":true}";
     return response;
+}
+
+// Helper function to extract long values from JSON
+long CHttpServer::ExtractLongValue(const std::string& json, const std::string& key)
+{
+    std::string searchKey = "\"" + key + "\":";
+    size_t pos = json.find(searchKey);
+    if (pos != std::string::npos) {
+        size_t valueStart = pos + searchKey.length();
+        size_t valueEnd = json.find_first_of(",}", valueStart);
+        if (valueEnd != std::string::npos) {
+            std::string valueStr = json.substr(valueStart, valueEnd - valueStart);
+            // Remove quotes if present
+            if (valueStr.front() == '"' && valueStr.back() == '"') {
+                valueStr = valueStr.substr(1, valueStr.length() - 2);
+            }
+            return std::stol(valueStr);
+        }
+    }
+    return 0;
 }
 
 std::string CHttpServer::JsonEscape(const std::string& str)
