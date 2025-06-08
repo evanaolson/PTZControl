@@ -16,6 +16,16 @@
 class CWebcamController
 {
 public:
+	// Property range structure for dynamic range detection
+	struct PropertyRange {
+		long min = 0;
+		long max = 100;
+		long step = 1;
+		long defaultValue = 50;
+		long flags = 0;
+		bool supported = false;
+	};
+
 	// Camera settings structure
 	struct CameraSettings {
 		long brightness = 50;
@@ -100,6 +110,11 @@ public:
 	HRESULT GetFocus(long* value, bool* isAuto);
 	HRESULT SetFocus(long value, bool isAuto);
 	
+	// Dynamic range detection methods
+	HRESULT GetPropertyRanges(std::map<long, PropertyRange>& videoProcAmpRanges, std::map<long, PropertyRange>& cameraControlRanges);
+	PropertyRange GetVideoProcAmpRange(long property);
+	PropertyRange GetCameraControlRange(long property);
+
 	// Enhanced property testing and capability detection
 	bool SupportsVideoProcAmpProperty(long property);
 	bool SupportsCameraControlProperty(long property);
@@ -119,6 +134,9 @@ public:
 	HRESULT SetCameraSettings(const CameraSettings& settings);
 	HRESULT ResetCameraSettings();
 	HRESULT RefreshCameraSettings();
+	
+	// Validation and logging methods
+	void LogAndValidateCameraRanges();
 	
 private:
 	bool DeviceMatches(CComPtr<IMoniker> pMoniker, BSTR devicePath, DWORD wVID, DWORD wPID);

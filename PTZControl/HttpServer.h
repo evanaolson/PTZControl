@@ -89,6 +89,7 @@ private:
     HttpResponse HandleSetCameraSettings(const HttpRequest& request);
     HttpResponse HandleGetCameraSettingsRanges(const HttpRequest& request);
     HttpResponse HandleResetCameraSettings(const HttpRequest& request);
+    HttpResponse HandleGetCameraRangesValidation(const HttpRequest& request);
     HttpResponse HandleAdvancedControls(const HttpRequest& request);
     
     // Helper methods

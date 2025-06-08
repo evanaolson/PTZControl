@@ -347,6 +347,70 @@ HRESULT CWebcamController::OpenDevice(CComPtr<IMoniker> pMoniker)
 		}
 	}
 
+	// COMPREHENSIVE CAMERA PROPERTY ANALYSIS
+	TRACE("=== COMPREHENSIVE CAMERA PROPERTY ANALYSIS ===\n");
+
+	if (m_spAMCameraControl) {
+		const struct { long prop; const char* name; } cameraProps[] = {
+			{CameraControl_Pan, "Pan"},
+			{CameraControl_Tilt, "Tilt"},
+			{CameraControl_Roll, "Roll"},
+			{CameraControl_Zoom, "Zoom"},
+			{CameraControl_Exposure, "Exposure"},
+			{CameraControl_Iris, "Iris"},
+			{CameraControl_Focus, "Focus"}
+		};
+		
+		for (const auto& prop : cameraProps) {
+			long min, max, step, def, flags, currentVal, currentFlags;
+			HRESULT hr = m_spAMCameraControl->GetRange(prop.prop, &min, &max, &step, &def, &flags);
+			if (SUCCEEDED(hr) && flags != 0) {
+				m_spAMCameraControl->Get(prop.prop, &currentVal, &currentFlags);
+				TRACE("%s: SUPPORTED - Range[%d to %d, step %d, default %d] Caps[%s%s] Current[val=%d, %s]\n",
+					  prop.name, min, max, step, def,
+					  (flags & CameraControl_Flags_Auto) ? "AUTO " : "",
+					  (flags & CameraControl_Flags_Manual) ? "MANUAL" : "",
+					  currentVal,
+					  (currentFlags & CameraControl_Flags_Auto) ? "AUTO" : "MANUAL");
+			} else {
+				TRACE("%s: NOT SUPPORTED (hr=0x%x, flags=0x%x)\n", prop.name, hr, flags);
+			}
+		}
+	}
+
+	if (m_spVideoProcAmp) {
+		const struct { long prop; const char* name; } videoProcProps[] = {
+			{VideoProcAmp_Brightness, "Brightness"},
+			{VideoProcAmp_Contrast, "Contrast"},
+			{VideoProcAmp_Hue, "Hue"},
+			{VideoProcAmp_Saturation, "Saturation"},
+			{VideoProcAmp_Sharpness, "Sharpness"},
+			{VideoProcAmp_Gamma, "Gamma"},
+			{VideoProcAmp_WhiteBalance, "WhiteBalance"},
+			{VideoProcAmp_BacklightCompensation, "BacklightComp"},
+			{VideoProcAmp_Gain, "Gain"}
+		};
+		
+		for (const auto& prop : videoProcProps) {
+			long min, max, step, def, flags, currentVal, currentFlags;
+			HRESULT hr = m_spVideoProcAmp->GetRange(prop.prop, &min, &max, &step, &def, &flags);
+			if (SUCCEEDED(hr) && flags != 0) {
+				m_spVideoProcAmp->Get(prop.prop, &currentVal, &currentFlags);
+				TRACE("%s: SUPPORTED - Range[%d to %d, step %d, default %d] Caps[%s%s] Current[val=%d, %s]\n",
+					  prop.name, min, max, step, def,
+					  (flags & VideoProcAmp_Flags_Auto) ? "AUTO " : "",
+					  (flags & VideoProcAmp_Flags_Manual) ? "MANUAL" : "",
+					  currentVal,
+					  (currentFlags & VideoProcAmp_Flags_Auto) ? "AUTO" : "MANUAL");
+			} else {
+				TRACE("%s: NOT SUPPORTED (hr=0x%x, flags=0x%x)\n", prop.name, hr, flags);
+			}
+		}
+	}
+
+	// Call the validation logging function
+	LogAndValidateCameraRanges();
+
 	if (m_spAMCameraControl!=nullptr)
 	{
 		long lValue = 0, lMin = 0, lMax = 0, lSteppingSize = 0, lDefaults = 0, lFlags = 0;
@@ -719,6 +783,236 @@ void CWebcamController::ListDevices(CStringArray &aDevices)
 	}
 }
 
+void CWebcamController::LogAndValidateCameraRanges()
+{
+    TRACE("\n=== CAMERA PROPERTY RANGES VALIDATION ===\n");
+    
+    if (m_spVideoProcAmp) {
+        TRACE("VideoProcAmp Properties:\n");
+        
+        struct PropertyInfo {
+            long prop;
+            const char* name;
+            long expectedMin;
+            long expectedMax;
+            long expectedDefault;
+        };
+        
+        PropertyInfo vpProps[] = {
+            {VideoProcAmp_Brightness, "Brightness", 0, 255, 128},
+            {VideoProcAmp_Contrast, "Contrast", 0, 255, 128},
+            {VideoProcAmp_Saturation, "Saturation", 0, 255, 128},
+            {VideoProcAmp_Sharpness, "Sharpness", 0, 255, 128},
+            {VideoProcAmp_WhiteBalance, "WhiteBalance", 2800, 6500, 4600},
+            {VideoProcAmp_BacklightCompensation, "BacklightComp", 0, 1, 0},
+            {VideoProcAmp_Gain, "Gain", 0, 32, 0}
+        };
+        
+        for (int i = 0; i < _countof(vpProps); i++) {
+            PropertyInfo& prop = vpProps[i];
+            long min, max, step, def, flags;
+            HRESULT hr = m_spVideoProcAmp->GetRange(prop.prop, &min, &max, &step, &def, &flags);
+            
+            if (SUCCEEDED(hr) && flags != 0) {
+                TRACE("  ✓ %s: %ld to %ld, step=%ld, default=%ld, flags=0x%lx", 
+                       prop.name, min, max, step, def, flags);
+                
+                // Validate against expected ranges
+                bool rangeMatches = (min == prop.expectedMin && max == prop.expectedMax);
+                bool defaultMatches = (def == prop.expectedDefault);
+                
+                if (rangeMatches && defaultMatches) {
+                    TRACE(" [MATCHES OBS]");
+                } else {
+                    TRACE(" [DIFFERS: expected %ld-%ld, default %ld]", 
+                           prop.expectedMin, prop.expectedMax, prop.expectedDefault);
+                }
+                
+                // Check auto/manual support
+                TRACE(" Modes:[%s%s]", 
+                       (flags & VideoProcAmp_Flags_Auto) ? "AUTO " : "",
+                       (flags & VideoProcAmp_Flags_Manual) ? "MANUAL" : "");
+                
+                TRACE("\n");
+            } else {
+                TRACE("  ✗ %s: NOT SUPPORTED (hr=0x%lx, flags=0x%lx)\n", prop.name, hr, flags);
+            }
+        }
+    }
+    
+    if (m_spAMCameraControl) {
+        TRACE("\nCameraControl Properties:\n");
+        
+        struct PropertyInfo {
+            long prop;
+            const char* name;
+            long expectedMin;
+            long expectedMax;
+            long expectedDefault;
+        };
+        
+        PropertyInfo ccProps[] = {
+            {CameraControl_Focus, "Focus", 0, 255, 8},
+            {CameraControl_Exposure, "Exposure", -11, -2, -6},
+            {CameraControl_Zoom, "Zoom", 100, 500, 100},
+            {CameraControl_Pan, "Pan", -180, 180, 0},
+            {CameraControl_Tilt, "Tilt", -90, 90, 0}
+        };
+        
+        for (int i = 0; i < _countof(ccProps); i++) {
+            PropertyInfo& prop = ccProps[i];
+            long min, max, step, def, flags;
+            HRESULT hr = m_spAMCameraControl->GetRange(prop.prop, &min, &max, &step, &def, &flags);
+            
+            if (SUCCEEDED(hr) && flags != 0) {
+                TRACE("  ✓ %s: %ld to %ld, step=%ld, default=%ld, flags=0x%lx", 
+                       prop.name, min, max, step, def, flags);
+                
+                // Validate against expected ranges  
+                bool rangeMatches = (min == prop.expectedMin && max == prop.expectedMax);
+                bool defaultMatches = (def == prop.expectedDefault);
+                
+                if (rangeMatches && defaultMatches) {
+                    TRACE(" [MATCHES OBS]");
+                } else {
+                    TRACE(" [DIFFERS: expected %ld-%ld, default %ld]", 
+                           prop.expectedMin, prop.expectedMax, prop.expectedDefault);
+                }
+                
+                // Check auto/manual support
+                TRACE(" Modes:[%s%s]", 
+                       (flags & CameraControl_Flags_Auto) ? "AUTO " : "",
+                       (flags & CameraControl_Flags_Manual) ? "MANUAL" : "");
+                
+                TRACE("\n");
+            } else {
+                TRACE("  ✗ %s: NOT SUPPORTED (hr=0x%lx, flags=0x%lx)\n", prop.name, hr, flags);
+            }
+        }
+    }
+    
+    TRACE("==========================================\n\n");
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Dynamic Range Detection Implementation
+
+HRESULT CWebcamController::GetPropertyRanges(std::map<long, PropertyRange>& videoProcAmpRanges, std::map<long, PropertyRange>& cameraControlRanges)
+{
+    // Clear existing ranges
+    videoProcAmpRanges.clear();
+    cameraControlRanges.clear();
+    
+    // VideoProcAmp properties to test
+    long videoProcAmpProperties[] = {
+        VideoProcAmp_Brightness,
+        VideoProcAmp_Contrast,
+        VideoProcAmp_Hue,
+        VideoProcAmp_Saturation,
+        VideoProcAmp_Sharpness,
+        VideoProcAmp_Gamma,
+        VideoProcAmp_WhiteBalance,
+        VideoProcAmp_BacklightCompensation,
+        VideoProcAmp_Gain,
+        VideoProcAmp_ColorEnable
+    };
+    
+    // Test VideoProcAmp properties
+    if (m_spVideoProcAmp) {
+        for (long property : videoProcAmpProperties) {
+            long min, max, step, defaultVal, flags;
+            HRESULT hr = m_spVideoProcAmp->GetRange(property, &min, &max, &step, &defaultVal, &flags);
+            if (SUCCEEDED(hr) && flags != 0) { // flags == 0 means not supported
+                PropertyRange range;
+                range.min = min;
+                range.max = max;
+                range.step = step;
+                range.defaultValue = defaultVal;
+                range.flags = flags;
+                range.supported = true;
+                videoProcAmpRanges[property] = range;
+                
+                TRACE("VideoProcAmp property %d: min=%d, max=%d, step=%d, default=%d, flags=%d\n", 
+                      property, min, max, step, defaultVal, flags);
+            }
+        }
+    }
+    
+    // CameraControl properties to test
+    long cameraControlProperties[] = {
+        CameraControl_Pan,
+        CameraControl_Tilt,
+        CameraControl_Roll,
+        CameraControl_Zoom,
+        CameraControl_Exposure,
+        CameraControl_Iris,
+        CameraControl_Focus
+    };
+    
+    // Test CameraControl properties
+    if (m_spAMCameraControl) {
+        for (long property : cameraControlProperties) {
+            long min, max, step, defaultVal, flags;
+            HRESULT hr = m_spAMCameraControl->GetRange(property, &min, &max, &step, &defaultVal, &flags);
+            if (SUCCEEDED(hr) && flags != 0) { // flags == 0 means not supported
+                PropertyRange range;
+                range.min = min;
+                range.max = max;
+                range.step = step;
+                range.defaultValue = defaultVal;
+                range.flags = flags;
+                range.supported = true;
+                cameraControlRanges[property] = range;
+                
+                TRACE("CameraControl property %d: min=%d, max=%d, step=%d, default=%d, flags=%d\n", 
+                      property, min, max, step, defaultVal, flags);
+            }
+        }
+    }
+    
+    return S_OK;
+}
+
+CWebcamController::PropertyRange CWebcamController::GetVideoProcAmpRange(long property)
+{
+    CWebcamController::PropertyRange range;
+    
+    if (m_spVideoProcAmp) {
+        long min, max, step, defaultVal, flags;
+        HRESULT hr = m_spVideoProcAmp->GetRange(property, &min, &max, &step, &defaultVal, &flags);
+        if (SUCCEEDED(hr) && flags != 0) {
+            range.min = min;
+            range.max = max;
+            range.step = step;
+            range.defaultValue = defaultVal;
+            range.flags = flags;
+            range.supported = true;
+        }
+    }
+    
+    return range;
+}
+
+CWebcamController::PropertyRange CWebcamController::GetCameraControlRange(long property)
+{
+    CWebcamController::PropertyRange range;
+    
+    if (m_spAMCameraControl) {
+        long min, max, step, defaultVal, flags;
+        HRESULT hr = m_spAMCameraControl->GetRange(property, &min, &max, &step, &defaultVal, &flags);
+        if (SUCCEEDED(hr) && flags != 0) {
+            range.min = min;
+            range.max = max;
+            range.step = step;
+            range.defaultValue = defaultVal;
+            range.flags = flags;
+            range.supported = true;
+        }
+    }
+    
+    return range;
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Enhanced DirectShow Interface Support
 
@@ -1023,11 +1317,48 @@ HRESULT CWebcamController::GetWhiteBalance(long* value, bool* isAuto)
 
 HRESULT CWebcamController::SetWhiteBalance(long value, bool isAuto)
 {
+	// Test if white balance is supported
+	long min, max, step, defaultVal, capFlags;
+	HRESULT hrTest = GetVideoProcAmpRange(VideoProcAmp_WhiteBalance, &min, &max, &step, &defaultVal, &capFlags);
+	if (FAILED(hrTest) || capFlags == 0) {
+		TRACE("SetWhiteBalance: White balance control not supported (hr=0x%x, capFlags=0x%x)\n", hrTest, capFlags);
+		return E_NOTIMPL;
+	}
+	
+	TRACE("SetWhiteBalance: Camera supports range %d to %d, step=%d, default=%d, capFlags=0x%x\n", 
+		  min, max, step, defaultVal, capFlags);
+	
+	// Check if the requested mode is supported
+	if (isAuto && !(capFlags & VideoProcAmp_Flags_Auto)) {
+		TRACE("SetWhiteBalance: Auto white balance not supported by camera\n");
+		return E_INVALIDARG;
+	}
+	if (!isAuto && !(capFlags & VideoProcAmp_Flags_Manual)) {
+		TRACE("SetWhiteBalance: Manual white balance not supported by camera\n");
+		return E_INVALIDARG;
+	}
+	
+	// For auto mode, use the default value
+	if (isAuto) {
+		value = defaultVal;
+	} else {
+		// Clamp manual value to supported range
+		if (value < min) value = min;
+		if (value > max) value = max;
+		
+		// Align to step size
+		long adjustedValue = min + ((value - min) / step) * step;
+		value = adjustedValue;
+	}
+	
 	long flags = isAuto ? VideoProcAmp_Flags_Auto : VideoProcAmp_Flags_Manual;
 	HRESULT hr = SetVideoProcAmpProperty(VideoProcAmp_WhiteBalance, value, flags);
 	if (SUCCEEDED(hr)) {
 		m_cameraSettings.whiteBalance = value;
 		m_cameraSettings.autoWhiteBalance = isAuto;
+		TRACE("SetWhiteBalance SUCCESS: value=%d, flags=0x%x, auto=%s\n", value, flags, isAuto ? "YES" : "NO");
+	} else {
+		TRACE("SetWhiteBalance FAILED: hr=0x%x, value=%d, flags=0x%x\n", hr, value, flags);
 	}
 	return hr;
 }
@@ -1107,12 +1438,49 @@ HRESULT CWebcamController::SetExposure(long value, bool isAuto)
 {
 	if (!m_spAMCameraControl)
 		return E_INVALIDARG;
+	
+	// CRITICAL: Test exposure support and get valid range
+	long min, max, step, defaultVal, capFlags;
+	HRESULT hrTest = m_spAMCameraControl->GetRange(CameraControl_Exposure, &min, &max, &step, &defaultVal, &capFlags);
+	if (FAILED(hrTest) || capFlags == 0) {
+		TRACE("SetExposure: Exposure control not supported (hr=0x%x, capFlags=0x%x)\n", hrTest, capFlags);
+		return E_NOTIMPL;
+	}
+	
+	TRACE("SetExposure: Camera supports range %d to %d, step=%d, default=%d, capFlags=0x%x\n", 
+		  min, max, step, defaultVal, capFlags);
+	
+	// Check if the requested mode is supported
+	if (isAuto && !(capFlags & CameraControl_Flags_Auto)) {
+		TRACE("SetExposure: Auto exposure not supported by camera\n");
+		return E_INVALIDARG;
+	}
+	if (!isAuto && !(capFlags & CameraControl_Flags_Manual)) {
+		TRACE("SetExposure: Manual exposure not supported by camera\n");
+		return E_INVALIDARG;
+	}
+	
+	// For auto mode, use the default value
+	if (isAuto) {
+		value = defaultVal;
+	} else {
+		// Clamp manual value to supported range
+		if (value < min) value = min;
+		if (value > max) value = max;
 		
+		// Align to step size
+		long adjustedValue = min + ((value - min) / step) * step;
+		value = adjustedValue;
+	}
+	
 	long flags = isAuto ? CameraControl_Flags_Auto : CameraControl_Flags_Manual;
 	HRESULT hr = m_spAMCameraControl->Set(CameraControl_Exposure, value, flags);
 	if (SUCCEEDED(hr)) {
 		m_cameraSettings.exposure = value;
 		m_cameraSettings.autoExposure = isAuto;
+		TRACE("SetExposure SUCCESS: value=%d, flags=0x%x, auto=%s\n", value, flags, isAuto ? "YES" : "NO");
+	} else {
+		TRACE("SetExposure FAILED: hr=0x%x, value=%d, flags=0x%x\n", hr, value, flags);
 	}
 	return hr;
 }

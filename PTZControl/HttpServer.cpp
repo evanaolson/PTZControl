@@ -79,6 +79,7 @@ bool CHttpServer::Start(int port)
     RegisterRoute("POST", "/api/camera/settings/([0-9]+)", [this](const HttpRequest& req) { return HandleSetCameraSettings(req); });
     RegisterRoute("GET", "/api/camera/settings/([0-9]+)/ranges", [this](const HttpRequest& req) { return HandleGetCameraSettingsRanges(req); });
     RegisterRoute("POST", "/api/camera/settings/([0-9]+)/reset", [this](const HttpRequest& req) { return HandleResetCameraSettings(req); });
+    RegisterRoute("GET", "/api/camera/ranges/validation", [this](const HttpRequest& req) { return HandleGetCameraRangesValidation(req); });
     RegisterRoute("POST", "/api/controls/advanced", [this](const HttpRequest& req) { return HandleAdvancedControls(req); });
     RegisterRoute("OPTIONS", ".*", [this](const HttpRequest& req) { return HandleCORS(req); });
 
@@ -268,9 +269,21 @@ HttpResponse CHttpServer::RouteRequest(const HttpRequest& request)
                     size_t pos = pattern.find("([0-9]+)");
                     pattern.replace(pos, 8, "\\d+");
                     
-                    // Simple check if path matches pattern
-                    if (request.path.find("/api/presets/") == 0) {
-                        return route.second(request);
+                    // Extract base path from route pattern for matching
+                    std::string basePath = routePattern.substr(0, routePattern.find("([0-9]+)"));
+                    
+                    // Check if request path matches the base pattern and has a number
+                    if (request.path.find(basePath) == 0) {
+                        // Extract the part after base path to validate it's a number
+                        std::string remainder = request.path.substr(basePath.length());
+                        size_t slashPos = remainder.find('/');
+                        std::string numberPart = (slashPos != std::string::npos) ? remainder.substr(0, slashPos) : remainder;
+                        
+                        // Simple check if it's all digits
+                        bool isNumber = !numberPart.empty() && std::all_of(numberPart.begin(), numberPart.end(), ::isdigit);
+                        if (isNumber) {
+                            return route.second(request);
+                        }
                     }
                 } else if (routePattern == ".*") {
                     return route.second(request);
@@ -283,6 +296,100 @@ HttpResponse CHttpServer::RouteRequest(const HttpRequest& request)
     HttpResponse response;
     response.status_code = 404;
     response.body = "{\"error\":\"Not found\"}";
+    return response;
+}
+
+HttpResponse CHttpServer::HandleGetCameraRangesValidation(const HttpRequest& request)
+{
+    HttpResponse response;
+    
+    try {
+        if (m_pDialog) {
+            CWebcamController& cam = m_pDialog->GetCurrentWebCam();
+            
+            std::ostringstream json;
+            json << "{";
+            json << "\"validation\":{";
+            
+            // VideoProcAmp validation
+            json << "\"videoProcAmp\":{";
+            const struct { int prop; const char* name; int expectedMin; int expectedMax; int expectedDefault; } vpProps[] = {
+                {VideoProcAmp_Brightness, "brightness", 0, 255, 128},
+                {VideoProcAmp_Contrast, "contrast", 0, 255, 128},
+                {VideoProcAmp_Saturation, "saturation", 0, 255, 128},
+                {VideoProcAmp_Sharpness, "sharpness", 0, 255, 128},
+                {VideoProcAmp_WhiteBalance, "whiteBalance", 2800, 6500, 4600},
+                {VideoProcAmp_BacklightCompensation, "backlightCompensation", 0, 1, 0},
+                {VideoProcAmp_Gain, "gain", 0, 32, 0}
+            };
+            
+            bool first = true;
+            for (const auto& prop : vpProps) {
+                if (!first) json << ",";
+                first = false;
+                
+                long min, max, step, def, flags;
+                HRESULT hr = cam.TestAndGetVideoProcAmpRange(prop.prop, &min, &max, &step, &def, &flags);
+                
+                json << "\"" << prop.name << "\":{";
+                if (SUCCEEDED(hr) && flags != 0) {
+                    json << "\"supported\":true,";
+                    json << "\"actual\":{\"min\":" << min << ",\"max\":" << max << ",\"default\":" << def << "},";
+                    json << "\"expected\":{\"min\":" << prop.expectedMin << ",\"max\":" << prop.expectedMax << ",\"default\":" << prop.expectedDefault << "},";
+                    json << "\"matches\":" << ((min == prop.expectedMin && max == prop.expectedMax && def == prop.expectedDefault) ? "true" : "false") << ",";
+                    json << "\"autoSupported\":" << ((flags & VideoProcAmp_Flags_Auto) ? "true" : "false") << ",";
+                    json << "\"manualSupported\":" << ((flags & VideoProcAmp_Flags_Manual) ? "true" : "false");
+                } else {
+                    json << "\"supported\":false,\"error\":\"0x" << std::hex << hr << "\"";
+                }
+                json << "}";
+            }
+            json << "},";
+            
+            // CameraControl validation
+            json << "\"cameraControl\":{";
+            const struct { int prop; const char* name; int expectedMin; int expectedMax; int expectedDefault; } ccProps[] = {
+                {CameraControl_Focus, "focus", 0, 255, 8},
+                {CameraControl_Exposure, "exposure", -11, -2, -6},
+                {CameraControl_Zoom, "zoom", 100, 500, 100}
+            };
+            
+            first = true;
+            for (const auto& prop : ccProps) {
+                if (!first) json << ",";
+                first = false;
+                
+                long min, max, step, def, flags;
+                HRESULT hr = cam.TestAndGetCameraControlRange(prop.prop, &min, &max, &step, &def, &flags);
+                
+                json << "\"" << prop.name << "\":{";
+                if (SUCCEEDED(hr) && flags != 0) {
+                    json << "\"supported\":true,";
+                    json << "\"actual\":{\"min\":" << min << ",\"max\":" << max << ",\"default\":" << def << "},";
+                    json << "\"expected\":{\"min\":" << prop.expectedMin << ",\"max\":" << prop.expectedMax << ",\"default\":" << prop.expectedDefault << "},";
+                    json << "\"matches\":" << ((min == prop.expectedMin && max == prop.expectedMax && def == prop.expectedDefault) ? "true" : "false") << ",";
+                    json << "\"autoSupported\":" << ((flags & CameraControl_Flags_Auto) ? "true" : "false") << ",";
+                    json << "\"manualSupported\":" << ((flags & CameraControl_Flags_Manual) ? "true" : "false");
+                } else {
+                    json << "\"supported\":false,\"error\":\"0x" << std::hex << hr << "\"";
+                }
+                json << "}";
+            }
+            json << "}";
+            
+            json << "}";
+            json << "}";
+            
+            response.body = json.str();
+        } else {
+            response.status_code = 500;
+            response.body = "{\"error\":\"Camera not available\"}";
+        }
+    } catch (...) {
+        response.status_code = 500;
+        response.body = "{\"error\":\"Failed to validate camera ranges\"}";
+    }
+    
     return response;
 }
 
@@ -771,86 +878,169 @@ HttpResponse CHttpServer::HandleSetCameraSettings(const HttpRequest& request)
             CWebcamController& cam = m_pDialog->GetCurrentWebCam();
             std::string body = request.body;
             
-            // Parse individual settings from JSON body
-            // This is a simple parser - in production you'd want a proper JSON library
+            HRESULT overallResult = S_OK;
+            std::string errorDetails;
             
-            // Parse brightness
-            size_t pos = body.find("\"brightness\":");
-            if (pos != std::string::npos) {
-                size_t start = pos + 12;
-                size_t end = body.find_first_of(",}", start);
-                if (end != std::string::npos) {
-                    long value = std::stol(body.substr(start, end - start));
-                    cam.SetBrightness(value);
+            // Parse and apply each setting individually with error checking
+            if (body.find("\"brightness\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "brightness");
+                HRESULT hr = cam.SetBrightness(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "brightness failed; ";
                 }
             }
             
-            // Parse contrast
-            pos = body.find("\"contrast\":");
-            if (pos != std::string::npos) {
-                size_t start = pos + 11;
-                size_t end = body.find_first_of(",}", start);
-                if (end != std::string::npos) {
-                    long value = std::stol(body.substr(start, end - start));
-                    cam.SetContrast(value);
+            if (body.find("\"contrast\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "contrast");
+                HRESULT hr = cam.SetContrast(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "contrast failed; ";
                 }
             }
             
-            // Parse saturation
-            pos = body.find("\"saturation\":");
-            if (pos != std::string::npos) {
-                size_t start = pos + 13;
-                size_t end = body.find_first_of(",}", start);
-                if (end != std::string::npos) {
-                    long value = std::stol(body.substr(start, end - start));
-                    cam.SetSaturation(value);
+            if (body.find("\"saturation\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "saturation");
+                HRESULT hr = cam.SetSaturation(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "saturation failed; ";
                 }
             }
             
-            // Parse exposure
-            pos = body.find("\"autoExposure\":");
-            if (pos != std::string::npos) {
-                bool autoExposure = body.find("\"autoExposure\":true", pos) != std::string::npos;
-                long exposureValue = 0;
-                
-                size_t expPos = body.find("\"exposure\":");
-                if (expPos != std::string::npos) {
-                    size_t start = expPos + 11;
-                    size_t end = body.find_first_of(",}", start);
-                    if (end != std::string::npos) {
-                        exposureValue = std::stol(body.substr(start, end - start));
-                    }
+            if (body.find("\"hue\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "hue");
+                HRESULT hr = cam.SetHue(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "hue failed; ";
                 }
-                
-                cam.SetExposure(exposureValue, autoExposure);
             }
             
-            // Parse white balance
-            pos = body.find("\"autoWhiteBalance\":");
-            if (pos != std::string::npos) {
-                bool autoWB = body.find("\"autoWhiteBalance\":true", pos) != std::string::npos;
-                long wbValue = 5200; // Default
-                
-                size_t wbPos = body.find("\"whiteBalance\":");
-                if (wbPos != std::string::npos) {
-                    size_t start = wbPos + 15;
-                    size_t end = body.find_first_of(",}", start);
-                    if (end != std::string::npos) {
-                        wbValue = std::stol(body.substr(start, end - start));
-                    }
+            if (body.find("\"sharpness\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "sharpness");
+                HRESULT hr = cam.SetSharpness(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "sharpness failed; ";
                 }
-                
-                cam.SetWhiteBalance(wbValue, autoWB);
             }
             
-            response.body = "{\"success\":true}";
+            if (body.find("\"gamma\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "gamma");
+                HRESULT hr = cam.SetGamma(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "gamma failed; ";
+                }
+            }
+            
+            if (body.find("\"gain\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "gain");
+                HRESULT hr = cam.SetGain(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "gain failed; ";
+                }
+            }
+            
+            if (body.find("\"backlightCompensation\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "backlightCompensation");
+                HRESULT hr = cam.SetBacklightCompensation(value);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "backlightCompensation failed; ";
+                }
+            }
+            
+            if (body.find("\"whiteBalance\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "whiteBalance");
+                bool isAuto = body.find("\"autoWhiteBalance\":true") != std::string::npos;
+                HRESULT hr = cam.SetWhiteBalance(value, isAuto);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "whiteBalance failed; ";
+                }
+            }
+            
+            if (body.find("\"autoWhiteBalance\"") != std::string::npos) {
+                bool isAuto = body.find("\"autoWhiteBalance\":true") != std::string::npos;
+                long currentValue = 5200; // Default
+                if (body.find("\"whiteBalance\"") != std::string::npos) {
+                    currentValue = ExtractLongValue(body, "whiteBalance");
+                }
+                HRESULT hr = cam.SetWhiteBalance(currentValue, isAuto);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "autoWhiteBalance failed; ";
+                }
+            }
+            
+            if (body.find("\"exposure\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "exposure");
+                bool isAuto = body.find("\"autoExposure\":true") != std::string::npos;
+                HRESULT hr = cam.SetExposure(value, isAuto);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "exposure failed; ";
+                }
+            }
+            
+            if (body.find("\"autoExposure\"") != std::string::npos) {
+                bool isAuto = body.find("\"autoExposure\":true") != std::string::npos;
+                long currentValue = -5; // Default
+                if (body.find("\"exposure\"") != std::string::npos) {
+                    currentValue = ExtractLongValue(body, "exposure");
+                }
+                HRESULT hr = cam.SetExposure(currentValue, isAuto);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "autoExposure failed; ";
+                }
+            }
+            
+            if (body.find("\"focus\"") != std::string::npos) {
+                long value = ExtractLongValue(body, "focus");
+                bool isAuto = body.find("\"autoFocus\":true") != std::string::npos;
+                HRESULT hr = cam.SetFocus(value, isAuto);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "focus failed; ";
+                }
+            }
+            
+            if (body.find("\"autoFocus\"") != std::string::npos) {
+                bool isAuto = body.find("\"autoFocus\":true") != std::string::npos;
+                long currentValue = 50; // Default
+                if (body.find("\"focus\"") != std::string::npos) {
+                    currentValue = ExtractLongValue(body, "focus");
+                }
+                HRESULT hr = cam.SetFocus(currentValue, isAuto);
+                if (FAILED(hr)) {
+                    overallResult = hr;
+                    errorDetails += "autoFocus failed; ";
+                }
+            }
+            
+            // Create detailed response
+            if (SUCCEEDED(overallResult)) {
+                response.body = "{\"success\":true}";
+            } else {
+                response.status_code = 500;
+                response.body = "{\"success\":false,\"error\":\"" + errorDetails + "\",\"hresult\":\"0x" + 
+                    std::to_string(static_cast<unsigned long>(overallResult)) + "\"}";
+            }
         } else {
             response.status_code = 500;
             response.body = "{\"error\":\"Camera not available\"}";
         }
+    } catch (const std::exception& e) {
+        response.status_code = 500;
+        response.body = "{\"error\":\"Exception: " + std::string(e.what()) + "\"}";
     } catch (...) {
         response.status_code = 500;
-        response.body = "{\"error\":\"Failed to set camera settings\"}";
+        response.body = "{\"error\":\"Unknown error occurred\"}";
     }
     
     return response;
@@ -864,35 +1054,77 @@ HttpResponse CHttpServer::HandleGetCameraSettingsRanges(const HttpRequest& reque
         if (m_pDialog) {
             CWebcamController& cam = m_pDialog->GetCurrentWebCam();
             
+            std::map<long, CWebcamController::PropertyRange> videoProcAmpRanges;
+            std::map<long, CWebcamController::PropertyRange> cameraControlRanges;
+            
+            cam.GetPropertyRanges(videoProcAmpRanges, cameraControlRanges);
+            
             std::ostringstream json;
             json << "{";
+            json << "\"videoProcAmp\":{";
             
-            // Get ranges for various properties
-            long min, max, step, defaultVal, flags;
-            
-            // Brightness range
-            if (SUCCEEDED(cam.GetVideoProcAmpRange(VideoProcAmp_Brightness, &min, &max, &step, &defaultVal, &flags))) {
-                json << "\"brightness\":{\"min\":" << min << ",\"max\":" << max << ",\"step\":" << step << ",\"default\":" << defaultVal << "},";
+            bool first = true;
+            for (const auto& pair : videoProcAmpRanges) {
+                if (!first) json << ",";
+                first = false;
+                
+                std::string propertyName;
+                switch (pair.first) {
+                    case VideoProcAmp_Brightness: propertyName = "brightness"; break;
+                    case VideoProcAmp_Contrast: propertyName = "contrast"; break;
+                    case VideoProcAmp_Hue: propertyName = "hue"; break;
+                    case VideoProcAmp_Saturation: propertyName = "saturation"; break;
+                    case VideoProcAmp_Sharpness: propertyName = "sharpness"; break;
+                    case VideoProcAmp_Gamma: propertyName = "gamma"; break;
+                    case VideoProcAmp_WhiteBalance: propertyName = "whiteBalance"; break;
+                    case VideoProcAmp_BacklightCompensation: propertyName = "backlightCompensation"; break;
+                    case VideoProcAmp_Gain: propertyName = "gain"; break;
+                    case VideoProcAmp_ColorEnable: propertyName = "colorEnable"; break;
+                    default: continue;
+                }
+                
+                const auto& range = pair.second;
+                json << "\"" << propertyName << "\":{";
+                json << "\"min\":" << range.min << ",";
+                json << "\"max\":" << range.max << ",";
+                json << "\"step\":" << range.step << ",";
+                json << "\"default\":" << range.defaultValue << ",";
+                json << "\"flags\":" << range.flags;
+                json << "}";
             }
             
-            // Contrast range
-            if (SUCCEEDED(cam.GetVideoProcAmpRange(VideoProcAmp_Contrast, &min, &max, &step, &defaultVal, &flags))) {
-                json << "\"contrast\":{\"min\":" << min << ",\"max\":" << max << ",\"step\":" << step << ",\"default\":" << defaultVal << "},";
+            json << "},";
+            json << "\"cameraControl\":{";
+            
+            first = true;
+            for (const auto& pair : cameraControlRanges) {
+                if (!first) json << ",";
+                first = false;
+                
+                std::string propertyName;
+                switch (pair.first) {
+                    case CameraControl_Exposure: propertyName = "exposure"; break;
+                    case CameraControl_Focus: propertyName = "focus"; break;
+                    case CameraControl_Zoom: propertyName = "zoom"; break;
+                    case CameraControl_Pan: propertyName = "pan"; break;
+                    case CameraControl_Tilt: propertyName = "tilt"; break;
+                    default: continue;
+                }
+                
+                const auto& range = pair.second;
+                json << "\"" << propertyName << "\":{";
+                json << "\"min\":" << range.min << ",";
+                json << "\"max\":" << range.max << ",";
+                json << "\"step\":" << range.step << ",";
+                json << "\"default\":" << range.defaultValue << ",";
+                json << "\"flags\":" << range.flags;
+                json << "}";
             }
             
-            // Saturation range
-            if (SUCCEEDED(cam.GetVideoProcAmpRange(VideoProcAmp_Saturation, &min, &max, &step, &defaultVal, &flags))) {
-                json << "\"saturation\":{\"min\":" << min << ",\"max\":" << max << ",\"step\":" << step << ",\"default\":" << defaultVal << "},";
-            }
+            json << "}";
+            json << "}";
             
-            // Remove trailing comma and close
-            std::string jsonStr = json.str();
-            if (jsonStr.back() == ',') {
-                jsonStr.pop_back();
-            }
-            jsonStr += "}";
-            
-            response.body = jsonStr;
+            response.body = json.str();
         } else {
             response.status_code = 500;
             response.body = "{\"error\":\"Camera not available\"}";
